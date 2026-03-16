@@ -76,9 +76,9 @@
         <customObject id="YLy-65-1bz" customClass="NSFontManager"/>
         <menu title="Main Menu" systemMenu="main" id="AYu-sK-qS6">
             <items>
-                <menuItem title="Ghostty" id="1Xt-HY-uBw">
+                <menuItem title="Phantom" id="1Xt-HY-uBw">
                     <modifierMask key="keyEquivalentModifierMask"/>
-                    <menu key="submenu" title="Ghostty" systemMenu="apple" id="uQy-DD-JDr">
+                    <menu key="submenu" title="Phantom" systemMenu="apple" id="uQy-DD-JDr">
                         <items>
                             <menuItem title="About Ghostty" id="5kV-Vb-QxS">
                                 <modifierMask key="keyEquivalentModifierMask"/>

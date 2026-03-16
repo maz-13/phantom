@@ -68,12 +68,86 @@ class AppLayoutManager: ObservableObject {
         }
     }
 
-    /// Unshelve all shelved surfaces back into the tree as splits.
+    /// Arrange all surfaces (visible + shelved) into an even grid layout.
     func showAllSurfaces() {
-        let toUnshelve = shelvedSurfaces
-        for item in toUnshelve {
-            unshelve(item)
+        guard let controller else { return }
+
+        // Collect every surface: currently in the tree + all shelved
+        let visibleSurfaces = Array(controller.surfaceTree)
+        let shelvedSurfaceViews = shelvedSurfaces.map { $0.surface }
+        let allSurfaces = visibleSurfaces + shelvedSurfaceViews
+
+        // Clear shelf state
+        for item in shelvedSurfaces {
+            titleObservers.removeValue(forKey: item.id)
+            activityResetTimers[item.id]?.invalidate()
+            activityResetTimers.removeValue(forKey: item.id)
         }
+        shelvedSurfaces.removeAll()
+
+        guard !allSurfaces.isEmpty else { return }
+
+        // Build a fresh grid tree and apply it
+        controller.surfaceTree = buildGridTree(allSurfaces)
+
+        withAnimation(.easeInOut(duration: 0.2)) { isSidebarVisible = false }
+    }
+
+    // MARK: - Grid Layout
+
+    /// Build a SplitTree with the given surfaces arranged in an even grid.
+    private func buildGridTree(_ surfaces: [Ghostty.SurfaceView]) -> SplitTree<Ghostty.SurfaceView> {
+        guard !surfaces.isEmpty else { return SplitTree() }
+        return SplitTree<Ghostty.SurfaceView>(root: buildGridNode(surfaces), zoomed: nil)
+    }
+
+    /// Recursively build the root Node for the given surfaces using a grid layout.
+    private func buildGridNode(_ surfaces: [Ghostty.SurfaceView]) -> SplitTree<Ghostty.SurfaceView>.Node {
+        let n = surfaces.count
+        let rows = Int(ceil(Double(n) / 3.0))
+        let base = n / rows
+        let extra = n % rows
+
+        // Distribute panels across rows — extra panels go to the bottom rows
+        var distribution: [Int] = Array(repeating: base, count: rows)
+        for i in (rows - extra)..<rows { distribution[i] += 1 }
+
+        // Build each row's node
+        var rowNodes: [SplitTree<Ghostty.SurfaceView>.Node] = []
+        var offset = 0
+        for count in distribution {
+            rowNodes.append(buildRowNode(Array(surfaces[offset..<offset + count])))
+            offset += count
+        }
+
+        return buildVerticalStack(rowNodes)
+    }
+
+    /// Build a left-leaning chain of horizontal splits for a single row of panels.
+    /// Each panel gets equal width via ratio = (N-1)/N at each nesting level.
+    private func buildRowNode(_ surfaces: [Ghostty.SurfaceView]) -> SplitTree<Ghostty.SurfaceView>.Node {
+        let n = surfaces.count
+        if n == 1 { return .leaf(view: surfaces[0]) }
+        let ratio = Double(n - 1) / Double(n)
+        return .split(.init(
+            direction: .horizontal,
+            ratio: ratio,
+            left: buildRowNode(Array(surfaces[0..<n - 1])),
+            right: .leaf(view: surfaces[n - 1])
+        ))
+    }
+
+    /// Stack multiple row nodes vertically with equal height.
+    private func buildVerticalStack(_ nodes: [SplitTree<Ghostty.SurfaceView>.Node]) -> SplitTree<Ghostty.SurfaceView>.Node {
+        let n = nodes.count
+        if n == 1 { return nodes[0] }
+        let ratio = Double(n - 1) / Double(n)
+        return .split(.init(
+            direction: .vertical,
+            ratio: ratio,
+            left: buildVerticalStack(Array(nodes[0..<n - 1])),
+            right: nodes[n - 1]
+        ))
     }
 
     func shelve(surface: Ghostty.SurfaceView) {
