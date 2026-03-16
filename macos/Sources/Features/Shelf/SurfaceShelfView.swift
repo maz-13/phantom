@@ -1,7 +1,15 @@
 import SwiftUI
 
+// Catppuccin Mocha Mauve
+private let mauveAccent = Color(red: 203/255, green: 166/255, blue: 247/255)
+
 struct SurfaceShelfView: View {
     @ObservedObject var layoutManager: AppLayoutManager
+
+    private var terminalBackground: Color {
+        layoutManager.sidebarItems.first?.surface.derivedConfig.backgroundColor
+            ?? Color(NSColor.windowBackgroundColor)
+    }
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: false) {
@@ -14,7 +22,7 @@ struct SurfaceShelfView: View {
             .padding(.vertical, 12)
         }
         .frame(width: 200)
-        .background(.ultraThinMaterial)
+        .background(terminalBackground)
         .onHover { hovering in
             if !hovering {
                 withAnimation(.easeInOut(duration: 0.2)) {
@@ -38,63 +46,64 @@ private struct SidebarItemRow: View {
         self._surface = ObservedObject(wrappedValue: item.surface)
     }
 
+    /// Last path component of pwd, falling back to "~" for home or unknown.
+    private var dirName: String {
+        guard let pwd = surface.pwd, !pwd.isEmpty else { return "~" }
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        if pwd == home { return "~" }
+        return URL(fileURLWithPath: pwd).lastPathComponent
+    }
+
+    /// Shell title shown as subtitle when it carries meaningful info (not just "zsh" or empty).
     private var subtitle: String? {
         let title = surface.title
         guard !title.isEmpty else { return nil }
-        if item.hasActivity { return title }
-        guard title != item.displayName else { return nil }
+        let boring = ["zsh", "bash", "fish", "sh"]
+        guard !boring.contains(title.lowercased()) else { return nil }
         return title
     }
 
     var body: some View {
         HStack(spacing: 8) {
-            // State dot
-            Circle()
-                .fill(dotColor)
-                .frame(width: 6, height: 6)
-
             VStack(alignment: .leading, spacing: 1) {
-                Text(item.displayName)
+                Text(dirName)
                     .font(.system(size: 12))
+                    .foregroundStyle(item.state == .focused ? mauveAccent : .primary)
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .opacity(item.state == .shelved ? 0.55 : 1.0)
 
-                if let subtitle {
-                    Text(subtitle)
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
+                Text(subtitle ?? " ")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .opacity(subtitle == nil ? 0 : 1)
             }
 
             Spacer(minLength: 0)
 
-            // Right-side indicators (only for shelved items)
-            if item.state == .shelved {
-                if isHovered {
-                    Button(action: { layoutManager.close(item.shelvedSurface!) }) {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 9, weight: .medium))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 16, height: 16)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                } else if item.hasActivity {
-                    TimelineView(.animation(minimumInterval: 0.08)) { timeline in
-                        let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
-                        let idx = Int(timeline.date.timeIntervalSinceReferenceDate / 0.08) % frames.count
-                        Text(frames[idx])
-                            .font(.system(size: 13, design: .monospaced))
-                            .foregroundStyle(.green)
-                    }
-                } else if item.needsAttention {
-                    Text("●")
-                        .font(.system(size: 7, design: .monospaced))
-                        .foregroundStyle(.orange)
+            if isHovered && canClose {
+                Button(action: { closeItem() }) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 16, height: 16)
+                        .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+            } else if item.state == .shelved && item.hasActivity {
+                TimelineView(.animation(minimumInterval: 0.08)) { timeline in
+                    let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+                    let idx = Int(timeline.date.timeIntervalSinceReferenceDate / 0.08) % frames.count
+                    Text(frames[idx])
+                        .font(.system(size: 13, design: .monospaced))
+                        .foregroundStyle(.green)
+                }
+            } else if item.state == .shelved && item.needsAttention {
+                Text("●")
+                    .font(.system(size: 7, design: .monospaced))
+                    .foregroundStyle(.orange)
             }
         }
         .padding(.horizontal, 8)
@@ -103,6 +112,14 @@ private struct SidebarItemRow: View {
             RoundedRectangle(cornerRadius: 6)
                 .fill(rowBackground)
         )
+        .overlay(alignment: .leading) {
+            if item.state != .shelved {
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(item.state == .focused ? mauveAccent : mauveAccent.opacity(0.3))
+                    .frame(width: 3)
+                    .padding(.vertical, 4)
+            }
+        }
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
         .draggable(item.surface)
@@ -118,20 +135,29 @@ private struct SidebarItemRow: View {
         }
     }
 
-    private var dotColor: Color {
+    /// False only when this is the last panel everywhere (can't close the final surface).
+    private var canClose: Bool {
+        let activeCount = layoutManager.sidebarItems.filter { $0.state != .shelved }.count
+        let shelvedCount = layoutManager.shelvedSurfaces.count
+        if item.state == .shelved { return true }
+        return activeCount > 1 || shelvedCount > 0
+    }
+
+    private func closeItem() {
         switch item.state {
-        case .focused: return Color.accentColor
-        case .active:  return Color.accentColor.opacity(0.4)
-        case .shelved: return Color.clear
+        case .shelved:
+            layoutManager.close(item.shelvedSurface!)
+        case .focused, .active:
+            layoutManager.closeActive(item.surface)
         }
     }
 
     private var rowBackground: Color {
         if item.state == .focused {
-            return Color.accentColor.opacity(0.15)
+            return mauveAccent.opacity(0.15)
         }
         return isHovered
-            ? Color(NSColor.selectedContentBackgroundColor).opacity(0.15)
+            ? mauveAccent.opacity(0.1)
             : Color.clear
     }
 }

@@ -83,12 +83,6 @@ struct TerminalView<ViewModel: TerminalViewModel>: View {
                     }
 
                     VStack(spacing: 0) {
-                    // If we're running in debug mode we show a warning so that users
-                    // know that performance will be degraded.
-                    if Ghostty.info.mode == GHOSTTY_BUILD_MODE_DEBUG || Ghostty.info.mode == GHOSTTY_BUILD_MODE_RELEASE_SAFE {
-                        DebugBuildWarningView()
-                    }
-
                     TerminalSplitTreeView(
                         tree: viewModel.surfaceTree,
                         action: { delegate?.performSplitAction($0) })
@@ -215,37 +209,27 @@ private struct UpdateOverlay: View {
     }
 }
 
-struct DebugBuildWarningView: View {
+struct DebugTitlebarButtonView: View {
     @State private var isPopover = false
 
     var body: some View {
-        HStack {
-            Spacer()
-
+        Button(action: { isPopover = true }) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundColor(.yellow)
-
-            Text("You're running a debug build of Phantom! Performance will be degraded.")
-                .padding(.all, 8)
-                .popover(isPresented: $isPopover, arrowEdge: .bottom) {
-                    Text("""
-                    Debug builds of Phantom are very slow and you may experience
-                    performance problems. Debug builds are only recommended during
-                    development.
-                    """)
-                    .padding(.all)
-                }
-
-            Spacer()
+                .font(.system(size: 12))
         }
-        .background(Color(.windowBackgroundColor))
-        .frame(maxWidth: .infinity)
-        .accessibilityElement(children: .combine)
+        .buttonStyle(.plain)
+        .popover(isPresented: $isPopover, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Debug Build")
+                    .font(.headline)
+                Text("You're running a debug build of Phantom! Performance will be degraded.\n\nDebug builds are very slow and only recommended during development.")
+                    .font(.body)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding()
+            .frame(width: 280)
+        }
         .accessibilityLabel("Debug build warning")
-        .accessibilityValue("Debug builds of Phantom are very slow and you may experience performance problems. Debug builds are only recommended during development.")
-        .accessibilityAddTraits(.isStaticText)
-        .onTapGesture {
-            isPopover = true
-        }
     }
 }

@@ -817,6 +817,12 @@ class BaseTerminalController: NSWindowController,
             return nil
         }
 
+        // Cmd+Z (keyCode 6) — restore previous split layout
+        if event.keyCode == 6 && mods == [.command] && layoutManager.savedLayout != nil {
+            layoutManager.restorePreviousLayout()
+            return nil
+        }
+
         return event
     }
 
@@ -880,6 +886,10 @@ class BaseTerminalController: NSWindowController,
         applyTitleToWindow()
     }
 
+    private static var isDebugBuild: Bool {
+        Ghostty.info.mode == GHOSTTY_BUILD_MODE_DEBUG || Ghostty.info.mode == GHOSTTY_BUILD_MODE_RELEASE_SAFE
+    }
+
     private func applyTitleToWindow() {
         guard let window else { return }
 
@@ -896,7 +906,7 @@ class BaseTerminalController: NSWindowController,
     func pwdDidChange(to: URL?) {
         guard let window else { return }
 
-        if derivedConfig.macosTitlebarProxyIcon == .visible {
+        if derivedConfig.macosTitlebarProxyIcon == .visible && !Self.isDebugBuild {
             // Use the 'to' URL directly
             window.representedURL = to
         } else {
@@ -1225,6 +1235,16 @@ class BaseTerminalController: NSWindowController,
 
         // Set our update overlay state
         updateOverlayIsVisible = defaultUpdateOverlayVisibility()
+
+        // In debug/release-safe builds, add a clickable warning button to the titlebar.
+        if Self.isDebugBuild {
+            let accessory = NSTitlebarAccessoryViewController()
+            let button = NSHostingView(rootView: DebugTitlebarButtonView())
+            button.frame = NSRect(x: 0, y: 0, width: 20, height: 22)
+            accessory.view = button
+            accessory.layoutAttribute = .trailing
+            window.addTitlebarAccessoryViewController(accessory)
+        }
     }
 
     func defaultUpdateOverlayVisibility() -> Bool {

@@ -19,6 +19,15 @@ def main [
         []
     }
 
+    # Clear xattrs and strip the existing signature from the built app before xcodebuild.
+    # open.sh signs the app after each build; xcodebuild's CodeSign step then fails on
+    # the next build because of leftover xattrs ("resource fork/detritus not allowed").
+    let app_path = ($build_dir | path join $configuration "Phantom.app")
+    if ($app_path | path exists) {
+        ^xattr -cr $app_path
+        ^codesign --remove-signature $app_path | ignore
+    }
+
     (^env -i
         $"HOME=($env.HOME)"
         "PATH=/usr/bin:/bin:/usr/sbin:/sbin"

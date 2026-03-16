@@ -58,6 +58,10 @@ class AppLayoutManager: ObservableObject {
     /// Stable insertion-order list of all surface IDs ever seen, used to keep sidebar order static.
     private var surfaceOrder: [UUID] = []
 
+    /// Snapshot of the split layout saved before unshelving a panel as sole view.
+    /// Cmd+Z restores this. Only set once per "sequence" — chained tab clicks don't overwrite it.
+    var savedLayout: SplitTree<Ghostty.SurfaceView>? = nil
+
     init(controller: BaseTerminalController) {
         self.controller = controller
         surfaceTreeCancellable = controller.$surfaceTree
@@ -309,6 +313,12 @@ class AppLayoutManager: ObservableObject {
         // (an empty tree triggers window close in TerminalController).
         let currentSurfaces = Array(controller.surfaceTree)
         let previousFocus = controller.focusedSurface
+
+        // Snapshot the current layout for Cmd+Z restore (only on the first tab switch).
+        if savedLayout == nil {
+            savedLayout = controller.surfaceTree
+        }
+
         controller.surfaceTree = .init(view: surface)
 
         // Shelve the previous surfaces now that they've been removed from the tree.
@@ -318,6 +328,52 @@ class AppLayoutManager: ObservableObject {
 
         // Explicitly move focus so focusedSurface updates and the sidebar highlight reflects correctly.
         Ghostty.moveFocus(to: surface, from: previousFocus)
+        rebuildSidebarItems()
+    }
+
+    /// Restore the split layout that was active before the last unshelveAsSole call (Cmd+Z).
+    func restorePreviousLayout() {
+        guard let controller, let layout = savedLayout else { return }
+        let currentSurfaces = Array(controller.surfaceTree)
+        controller.surfaceTree = layout
+        for surface in currentSurfaces {
+            if !Array(layout).contains(where: { $0.id == surface.id }) {
+                shelveDetached(surface: surface)
+            }
+        }
+        savedLayout = nil
+        rebuildSidebarItems()
+    }
+
+    /// Close an active (in-tree) surface from the sidebar.
+    /// - Multiple panels open: removes it, remaining panels stay.
+    /// - Only panel visible, shelved panels exist: shows the next shelved one.
+    /// - Only panel everywhere: no-op.
+    func closeActive(_ surface: Ghostty.SurfaceView) {
+        guard let controller else { return }
+        let tree = Array(controller.surfaceTree)
+        guard tree.contains(where: { $0.id == surface.id }) else { return }
+        guard !(tree.count == 1 && shelvedSurfaces.isEmpty) else { return }
+
+        savedLayout = nil
+
+        if tree.count > 1 {
+            // Remove from split — remaining panels stay visible
+            if let node = controller.surfaceTree.find(id: surface.id) {
+                controller.surfaceTree = controller.surfaceTree.removing(node)
+            }
+        } else {
+            // Only visible panel — promote the first shelved surface
+            let next = shelvedSurfaces[0]
+            titleObservers.removeValue(forKey: next.id)
+            pwdObservers.removeValue(forKey: next.id)
+            lastTitleChangeTimes.removeValue(forKey: next.id)
+            activityResetTimers[next.id]?.invalidate()
+            activityResetTimers.removeValue(forKey: next.id)
+            shelvedSurfaces.removeFirst()
+            controller.surfaceTree = .init(view: next.surface)
+            Ghostty.moveFocus(to: next.surface, from: surface)
+        }
         rebuildSidebarItems()
     }
 
