@@ -13,8 +13,6 @@ struct ShelvedSurface: Identifiable {
 
     var displayName: String {
         if let custom = customName, !custom.isEmpty { return custom }
-        let title = surface.title
-        if !title.isEmpty { return title }
         return "Terminal"
     }
 }
@@ -24,54 +22,26 @@ struct ShelvedSurface: Identifiable {
 class AppLayoutManager: ObservableObject {
 
     @Published private(set) var shelvedSurfaces: [ShelvedSurface] = []
-    @Published private(set) var isFocusModeActive: Bool = false
+    @Published var isSidebarVisible: Bool = true
+    @Published var isSidebarOverlaying: Bool = false
 
     private weak var controller: BaseTerminalController?
+
+    /// Title-change observers keyed by ShelvedSurface.id, used to animate the activity spinner.
+    private var titleObservers: [UUID: AnyCancellable] = [:]
+
+    /// Activity reset timers keyed by ShelvedSurface.id.
+    private var activityResetTimers: [UUID: Timer] = [:]
 
     init(controller: BaseTerminalController) {
         self.controller = controller
     }
 
-    // MARK: - Focus Mode
+    // MARK: - Sidebar
 
-    func toggleFocusMode() {
-        if isFocusModeActive {
-            exitFocusMode()
-        } else {
-            enterFocusMode()
-        }
-    }
-
-    private func enterFocusMode() {
-        guard let controller else { return }
-        guard let focused = controller.focusedSurface ?? controller.surfaceTree.first else { return }
-
-        let allSurfaces = Array(controller.surfaceTree)
-        let toShelve = allSurfaces.filter { $0 !== focused }
-        guard !toShelve.isEmpty else { return }
-
-        isFocusModeActive = true
-        for surface in toShelve {
-            shelve(surface: surface)
-        }
-    }
-
-    /// Exit focus mode: bring ALL shelved surfaces back and arrange in a grid.
-    private func exitFocusMode() {
-        guard let controller else {
-            isFocusModeActive = false
-            return
-        }
-
-        let currentSurfaces = Array(controller.surfaceTree)
-        let shelvedViews = shelvedSurfaces.map { $0.surface }
-        let allSurfaces = currentSurfaces + shelvedViews
-
-        shelvedSurfaces.removeAll()
-        isFocusModeActive = false
-
-        if let newTree = buildGridTree(surfaces: allSurfaces) {
-            controller.surfaceTree = newTree
+    func toggleSidebar() {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            isSidebarVisible.toggle()
         }
     }
 
@@ -83,12 +53,70 @@ class AppLayoutManager: ObservableObject {
         shelve(surface: surface)
     }
 
+    /// Shelve every surface in the tree except the currently focused one.
+    func shelveAllExceptFocused() {
+        guard let controller else { return }
+        guard let focused = controller.focusedSurface else { return }
+        let allSurfaces = Array(controller.surfaceTree)
+        guard allSurfaces.count > 1 else { return }
+        let toShelve = allSurfaces.filter { $0.id != focused.id }
+        for surface in toShelve {
+            shelve(surface: surface)
+        }
+        if !isSidebarVisible {
+            withAnimation(.easeInOut(duration: 0.2)) { isSidebarVisible = true }
+        }
+    }
+
+    /// Unshelve all shelved surfaces back into the tree as splits.
+    func showAllSurfaces() {
+        let toUnshelve = shelvedSurfaces
+        for item in toUnshelve {
+            unshelve(item)
+        }
+    }
+
     func shelve(surface: Ghostty.SurfaceView) {
         guard let controller else { return }
         guard let node = controller.surfaceTree.find(id: surface.id) else { return }
         guard Array(controller.surfaceTree).count > 1 else { return }
         controller.surfaceTree = controller.surfaceTree.removing(node)
-        shelvedSurfaces.append(ShelvedSurface(surface: surface))
+        addToShelf(surface: surface)
+    }
+
+    /// Shelve a surface that has already been removed from the tree (caller already replaced surfaceTree).
+    func shelveDetached(surface: Ghostty.SurfaceView) {
+        addToShelf(surface: surface)
+    }
+
+    private func addToShelf(surface: Ghostty.SurfaceView) {
+        let shelvedSurface = ShelvedSurface(surface: surface)
+        shelvedSurfaces.append(shelvedSurface)
+
+        // Observe title changes to drive the activity spinner
+        let id = shelvedSurface.id
+        titleObservers[id] = surface.$title
+            .dropFirst()
+            .sink { [weak self] _ in
+                guard let self else { return }
+                if let idx = self.shelvedSurfaces.firstIndex(where: { $0.id == id }) {
+                    self.shelvedSurfaces[idx].hasActivity = true
+                    self.scheduleActivityReset(for: id)
+                }
+            }
+    }
+
+    private func scheduleActivityReset(for id: UUID) {
+        activityResetTimers[id]?.invalidate()
+        activityResetTimers[id] = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: false) { [weak self] _ in
+            guard let self else { return }
+            DispatchQueue.main.async {
+                if let idx = self.shelvedSurfaces.firstIndex(where: { $0.id == id }) {
+                    self.shelvedSurfaces[idx].hasActivity = false
+                }
+                self.activityResetTimers.removeValue(forKey: id)
+            }
+        }
     }
 
     // MARK: - Unshelving
@@ -98,6 +126,9 @@ class AppLayoutManager: ObservableObject {
         guard let controller else { return }
         guard let index = shelvedSurfaces.firstIndex(where: { $0.id == shelvedSurface.id }) else { return }
 
+        titleObservers.removeValue(forKey: shelvedSurface.id)
+        activityResetTimers[shelvedSurface.id]?.invalidate()
+        activityResetTimers.removeValue(forKey: shelvedSurface.id)
         shelvedSurfaces.remove(at: index)
         let surface = shelvedSurface.surface
 
@@ -116,49 +147,15 @@ class AppLayoutManager: ObservableObject {
         }
     }
 
-    // MARK: - Grid Layout
+    // MARK: - Closing
 
-    /// Build a balanced grid tree from a list of surfaces.
-    ///
-    /// Layout rules:
-    /// - 1–3 surfaces: single row of vertical splits
-    /// - 4+ surfaces: two rows, bottom row gets ceil(n/2), top gets the rest
-    private func buildGridTree(surfaces: [Ghostty.SurfaceView]) -> SplitTree<Ghostty.SurfaceView>? {
-        guard !surfaces.isEmpty else { return nil }
-        if surfaces.count == 1 { return .init(view: surfaces[0]) }
-
-        let n = surfaces.count
-
-        if n <= 3 {
-            // Single row: chain .right inserts
-            var tree = SplitTree<Ghostty.SurfaceView>(view: surfaces[0])
-            for i in 1..<n {
-                tree = (try? tree.inserting(view: surfaces[i], at: surfaces[i - 1], direction: .right)) ?? tree
-            }
-            return tree
-        }
-
-        // Two rows
-        let row2Count = (n + 1) / 2   // ceil(n/2) — bottom row (gets more if odd)
-        let row1Count = n - row2Count  // top row
-
-        let row1 = Array(surfaces[0..<row1Count])
-        let row2 = Array(surfaces[row1Count...])
-
-        // Start with anchor (first of row1), add first of row2 below it
-        var tree = SplitTree<Ghostty.SurfaceView>(view: row1[0])
-        tree = (try? tree.inserting(view: row2[0], at: row1[0], direction: .down)) ?? tree
-
-        // Fill rest of row1 (right of row1[0])
-        for i in 1..<row1Count {
-            tree = (try? tree.inserting(view: row1[i], at: row1[i - 1], direction: .right)) ?? tree
-        }
-
-        // Fill rest of row2 (right of row2[0])
-        for i in 1..<row2Count {
-            tree = (try? tree.inserting(view: row2[i], at: row2[i - 1], direction: .right)) ?? tree
-        }
-
-        return tree
+    /// Permanently close and discard a shelved surface, killing its process.
+    func close(_ shelvedSurface: ShelvedSurface) {
+        guard let index = shelvedSurfaces.firstIndex(where: { $0.id == shelvedSurface.id }) else { return }
+        titleObservers.removeValue(forKey: shelvedSurface.id)
+        activityResetTimers[shelvedSurface.id]?.invalidate()
+        activityResetTimers.removeValue(forKey: shelvedSurface.id)
+        shelvedSurfaces.remove(at: index)
+        // Releasing the SurfaceView here causes ghostty_surface_free via Ghostty.Surface.deinit
     }
 }

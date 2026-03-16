@@ -178,6 +178,7 @@
 				Features/Settings/ConfigurationErrorsView.swift,
 				Features/Settings/SettingsView.swift,
 				Features/Shelf/AppLayoutManager.swift,
+				Features/Shelf/SidebarEdgeHoverStrip.swift,
 				Features/Shelf/SurfaceShelfView.swift,
 				Features/Splits/SplitTree.swift,
 				Features/Splits/SplitView.Divider.swift,

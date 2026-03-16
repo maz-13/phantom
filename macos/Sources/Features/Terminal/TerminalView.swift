@@ -76,10 +76,10 @@ struct TerminalView<ViewModel: TerminalViewModel>: View {
         case .ready:
             ZStack {
                 HStack(spacing: 0) {
-                    // Shelf sidebar on the left
-                    if let lm = layoutManager, !lm.shelvedSurfaces.isEmpty {
-                        SurfaceShelfView(layoutManager: lm)
-                        Divider()
+                    // Shelf sidebar on the left — shown when isSidebarVisible is true.
+                    // Uses a wrapper view to ensure re-renders on isSidebarVisible changes.
+                    if let lm = layoutManager {
+                        SidebarVisibleWrapper(layoutManager: lm)
                     }
 
                     VStack(spacing: 0) {
@@ -118,6 +118,12 @@ struct TerminalView<ViewModel: TerminalViewModel>: View {
                     .ignoresSafeArea(.container, edges: ghostty.config.macosTitlebarStyle == .hidden ? .top : [])
                 }
 
+                // Overlay sidebar (floating, no terminal resize) when sidebar is hidden
+                // and mouse is hovering the left edge.
+                if let lm = layoutManager {
+                    SidebarOverlayWrapper(layoutManager: lm)
+                }
+
                 if let surfaceView = lastFocusedSurface?.value {
                     TerminalCommandPaletteView(
                         surfaceView: surfaceView,
@@ -137,6 +143,57 @@ struct TerminalView<ViewModel: TerminalViewModel>: View {
         }
     }
 }
+
+// MARK: - Sidebar Wrapper Views
+
+/// Shows the permanent sidebar when isSidebarVisible is true.
+/// Separate view so @ObservedObject observation is scoped here.
+private struct SidebarVisibleWrapper: View {
+    @ObservedObject var layoutManager: AppLayoutManager
+
+    var body: some View {
+        if layoutManager.isSidebarVisible {
+            SurfaceShelfView(layoutManager: layoutManager)
+                .transition(.move(edge: .leading).combined(with: .opacity))
+            Divider()
+        }
+    }
+}
+
+/// Shows the floating overlay sidebar and edge hover strip when isSidebarVisible is false.
+private struct SidebarOverlayWrapper: View {
+    @ObservedObject var layoutManager: AppLayoutManager
+
+    var body: some View {
+        if !layoutManager.isSidebarVisible {
+            ZStack(alignment: .leading) {
+                if layoutManager.isSidebarOverlaying {
+                    HStack(spacing: 0) {
+                        SurfaceShelfView(layoutManager: layoutManager)
+                            .shadow(radius: 8, x: 4, y: 0)
+                            .transition(.move(edge: .leading).combined(with: .opacity))
+                        Spacer()
+                    }
+                }
+
+                HStack {
+                    SidebarEdgeHoverStrip(isHovering: Binding(
+                        get: { layoutManager.isSidebarOverlaying },
+                        set: { newVal in
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                layoutManager.isSidebarOverlaying = newVal
+                            }
+                        }
+                    ))
+                    .frame(width: 20)
+                    Spacer()
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Supporting Views
 
 private struct UpdateOverlay: View {
     var body: some View {

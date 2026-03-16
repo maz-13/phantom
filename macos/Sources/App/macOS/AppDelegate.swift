@@ -1362,25 +1362,35 @@ extension AppDelegate {
 
 extension AppDelegate {
     private func addShelfMenuItems() {
+        // All shelf shortcuts are intercepted via the local event monitor in
+        // BaseTerminalController. Menu items here are for discoverability only.
         guard let windowMenu = NSApp.mainMenu?.items.first(where: { $0.title == "Window" })?.submenu else { return }
 
         windowMenu.addItem(.separator())
 
-        let focusItem = NSMenuItem(
-            title: "Toggle Focus Mode",
-            action: #selector(BaseTerminalController.shelfToggleFocusMode(_:)),
+        let shelveOthersItem = NSMenuItem(
+            title: "Shelve Others",
+            action: #selector(BaseTerminalController.shelfShelveAllExceptCurrent(_:)),
             keyEquivalent: "s"
         )
-        focusItem.keyEquivalentModifierMask = [.command, .shift]
-        windowMenu.addItem(focusItem)
+        shelveOthersItem.keyEquivalentModifierMask = [.command, .shift]
+        windowMenu.addItem(shelveOthersItem)
 
-        let shelveItem = NSMenuItem(
+        let showAllItem = NSMenuItem(
+            title: "Show All Surfaces",
+            action: #selector(BaseTerminalController.shelfShowAllSurfaces(_:)),
+            keyEquivalent: "a"
+        )
+        showAllItem.keyEquivalentModifierMask = [.command, .shift]
+        windowMenu.addItem(showAllItem)
+
+        let shelveCurrentItem = NSMenuItem(
             title: "Shelve Current Surface",
             action: #selector(BaseTerminalController.shelfShelveCurrentSurface(_:)),
             keyEquivalent: "h"
         )
-        shelveItem.keyEquivalentModifierMask = [.command, .shift]
-        windowMenu.addItem(shelveItem)
+        shelveCurrentItem.keyEquivalentModifierMask = [.command, .shift]
+        windowMenu.addItem(shelveCurrentItem)
     }
 }
 

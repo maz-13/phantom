@@ -220,7 +220,7 @@ class BaseTerminalController: NSWindowController,
         // Listen for local events that we need to know of outside of
         // single surface handlers.
         self.eventMonitor = NSEvent.addLocalMonitorForEvents(
-            matching: [.flagsChanged]
+            matching: [.flagsChanged, .keyDown]
         ) { [weak self] event in self?.localEventHandler(event) }
     }
 
@@ -780,9 +780,44 @@ class BaseTerminalController: NSWindowController,
         case .flagsChanged:
             localEventFlagsChanged(event)
 
+        case .keyDown:
+            localEventKeyDown(event)
+
         default:
             event
         }
+    }
+
+    private func localEventKeyDown(_ event: NSEvent) -> NSEvent? {
+        let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+
+        // Check Cmd+Shift combos first (before plain Cmd checks on same keyCode)
+
+        // Cmd+Shift+S (keyCode 1) — shelve all surfaces except the focused one
+        if event.keyCode == 1 && mods == [.command, .shift] {
+            layoutManager.shelveAllExceptFocused()
+            return nil
+        }
+
+        // Cmd+Shift+H (keyCode 4) — shelve the current surface
+        if event.keyCode == 4 && mods == [.command, .shift] {
+            layoutManager.shelveCurrentSurface()
+            return nil
+        }
+
+        // Cmd+Shift+A (keyCode 0) — show all shelved surfaces
+        if event.keyCode == 0 && mods == [.command, .shift] {
+            layoutManager.showAllSurfaces()
+            return nil
+        }
+
+        // Cmd+S (keyCode 1) — toggle sidebar visibility
+        if event.keyCode == 1 && mods == [.command] {
+            layoutManager.toggleSidebar()
+            return nil
+        }
+
+        return event
     }
 
     private func localEventFlagsChanged(_ event: NSEvent) -> NSEvent? {
@@ -1454,12 +1489,30 @@ class BaseTerminalController: NSWindowController,
 
     // MARK: - Shelf Actions
 
-    @IBAction func shelfToggleFocusMode(_ sender: Any?) {
-        layoutManager.toggleFocusMode()
-    }
-
     @IBAction func shelfShelveCurrentSurface(_ sender: Any?) {
         layoutManager.shelveCurrentSurface()
+    }
+
+    @IBAction func shelfShelveAllExceptCurrent(_ sender: Any?) {
+        layoutManager.shelveAllExceptFocused()
+    }
+
+    @IBAction func shelfShowAllSurfaces(_ sender: Any?) {
+        layoutManager.showAllSurfaces()
+    }
+
+    /// Shelve all current surfaces, replace with a new blank terminal, and show the sidebar.
+    func newTerminalInShelf() {
+        guard let ghostty_app = ghostty.app else { return }
+        let newView = Ghostty.SurfaceView(ghostty_app, baseConfig: nil)
+        let current = Array(surfaceTree)
+        replaceSurfaceTree(.init(view: newView), moveFocusTo: newView, undoAction: "New Terminal")
+        for surface in current {
+            layoutManager.shelveDetached(surface: surface)
+        }
+        if !layoutManager.isSidebarVisible {
+            withAnimation(.easeInOut(duration: 0.2)) { layoutManager.isSidebarVisible = true }
+        }
     }
 }
 
