@@ -4,11 +4,24 @@ import SwiftUI
 
 // MARK: - Data Types
 
+struct SidebarItem: Identifiable {
+    enum State { case focused, active, shelved }
+    let id: UUID
+    let surface: Ghostty.SurfaceView
+    let shelvedSurface: ShelvedSurface?   // non-nil only when .shelved
+    var state: State
+    var hasActivity: Bool
+    var needsAttention: Bool
+    var displayName: String
+}
+
 struct ShelvedSurface: Identifiable {
     let id: UUID = UUID()
     let surface: Ghostty.SurfaceView
     var customName: String?
     var hasActivity: Bool = false
+    var hasBeenActive: Bool = false
+    var needsAttention: Bool = false
     let shelvedAt: Date = Date()
 
     var displayName: String {
@@ -22,6 +35,7 @@ struct ShelvedSurface: Identifiable {
 class AppLayoutManager: ObservableObject {
 
     @Published private(set) var shelvedSurfaces: [ShelvedSurface] = []
+    @Published private(set) var sidebarItems: [SidebarItem] = []
     @Published var isSidebarVisible: Bool = false
     @Published var isSidebarOverlaying: Bool = false
 
@@ -30,11 +44,64 @@ class AppLayoutManager: ObservableObject {
     /// Title-change observers keyed by ShelvedSurface.id, used to animate the activity spinner.
     private var titleObservers: [UUID: AnyCancellable] = [:]
 
+    /// PWD observers keyed by ShelvedSurface.id, used to detect when a command finishes.
+    private var pwdObservers: [UUID: AnyCancellable] = [:]
+
     /// Activity reset timers keyed by ShelvedSurface.id.
     private var activityResetTimers: [UUID: Timer] = [:]
 
+    /// Timestamp of last title change per surface, for rate-limiting the spinner trigger.
+    private var lastTitleChangeTimes: [UUID: Date] = [:]
+
+    private var surfaceTreeCancellable: AnyCancellable?
+
+    /// Stable insertion-order list of all surface IDs ever seen, used to keep sidebar order static.
+    private var surfaceOrder: [UUID] = []
+
     init(controller: BaseTerminalController) {
         self.controller = controller
+        surfaceTreeCancellable = controller.$surfaceTree
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.rebuildSidebarItems() }
+    }
+
+    // MARK: - Sidebar Items
+
+    func rebuildSidebarItems() {
+        guard let controller else { sidebarItems = []; return }
+        let focused = controller.focusedSurface
+        let treeMap = Dictionary(uniqueKeysWithValues: Array(controller.surfaceTree).map { ($0.id, $0) })
+        let shelfMap = Dictionary(uniqueKeysWithValues: shelvedSurfaces.map { ($0.surface.id, $0) })
+
+        // Register any new surfaces not yet tracked
+        for id in treeMap.keys where !surfaceOrder.contains(id) {
+            surfaceOrder.append(id)
+        }
+        for id in shelfMap.keys where !surfaceOrder.contains(id) {
+            surfaceOrder.append(id)
+        }
+        // Drop IDs that are gone entirely (closed, not in tree or shelf)
+        surfaceOrder = surfaceOrder.filter { treeMap[$0] != nil || shelfMap[$0] != nil }
+
+        // Build items in stable order
+        sidebarItems = surfaceOrder.compactMap { id in
+            if let surface = treeMap[id] {
+                let state: SidebarItem.State = (surface.id == focused?.id) ? .focused : .active
+                return SidebarItem(id: id, surface: surface, shelvedSurface: nil,
+                    state: state, hasActivity: false, needsAttention: false, displayName: "Terminal")
+            } else if let shelved = shelfMap[id] {
+                return SidebarItem(id: id, surface: shelved.surface, shelvedSurface: shelved,
+                    state: .shelved, hasActivity: shelved.hasActivity,
+                    needsAttention: shelved.needsAttention, displayName: shelved.displayName)
+            }
+            return nil
+        }
+    }
+
+    func focusActiveSurface(_ surface: Ghostty.SurfaceView) {
+        guard let controller else { return }
+        guard Array(controller.surfaceTree).contains(where: { $0.id == surface.id }) else { return }
+        Ghostty.moveFocus(to: surface, from: controller.focusedSurface)
     }
 
     // MARK: - Sidebar
@@ -80,6 +147,8 @@ class AppLayoutManager: ObservableObject {
         // Clear shelf state
         for item in shelvedSurfaces {
             titleObservers.removeValue(forKey: item.id)
+            pwdObservers.removeValue(forKey: item.id)
+            lastTitleChangeTimes.removeValue(forKey: item.id)
             activityResetTimers[item.id]?.invalidate()
             activityResetTimers.removeValue(forKey: item.id)
         }
@@ -91,6 +160,7 @@ class AppLayoutManager: ObservableObject {
         controller.surfaceTree = buildGridTree(allSurfaces)
 
         withAnimation(.easeInOut(duration: 0.2)) { isSidebarVisible = false }
+        rebuildSidebarItems()
     }
 
     // MARK: - Grid Layout
@@ -167,26 +237,50 @@ class AppLayoutManager: ObservableObject {
         let shelvedSurface = ShelvedSurface(surface: surface)
         shelvedSurfaces.append(shelvedSurface)
 
-        // Observe title changes to drive the activity spinner
         let id = shelvedSurface.id
+
+        // Title observer: spinner activates only on rapid changes (2 within 10s),
+        // filtering out one-off shell prompt title updates.
         titleObservers[id] = surface.$title
             .dropFirst()
             .sink { [weak self] _ in
                 guard let self else { return }
+                let now = Date()
+                let last = self.lastTitleChangeTimes[id]
+                self.lastTitleChangeTimes[id] = now
+                guard let last, now.timeIntervalSince(last) < 10.0 else { return }
                 if let idx = self.shelvedSurfaces.firstIndex(where: { $0.id == id }) {
                     self.shelvedSurfaces[idx].hasActivity = true
+                    self.shelvedSurfaces[idx].hasBeenActive = true
+                    self.shelvedSurfaces[idx].needsAttention = false
                     self.scheduleActivityReset(for: id)
+                }
+            }
+
+        // PWD observer: fires when the shell returns to the prompt (OSC 7).
+        // Immediately marks the surface as needing attention if it was previously active.
+        pwdObservers[id] = surface.$pwd
+            .dropFirst()
+            .sink { [weak self] _ in
+                guard let self else { return }
+                if let idx = self.shelvedSurfaces.firstIndex(where: { $0.id == id }) {
+                    guard self.shelvedSurfaces[idx].hasBeenActive else { return }
+                    self.activityResetTimers[id]?.invalidate()
+                    self.activityResetTimers.removeValue(forKey: id)
+                    self.shelvedSurfaces[idx].hasActivity = false
+                    self.shelvedSurfaces[idx].needsAttention = true
                 }
             }
     }
 
     private func scheduleActivityReset(for id: UUID) {
         activityResetTimers[id]?.invalidate()
-        activityResetTimers[id] = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: false) { [weak self] _ in
+        activityResetTimers[id] = Timer.scheduledTimer(withTimeInterval: 8.0, repeats: false) { [weak self] _ in
             guard let self else { return }
             DispatchQueue.main.async {
                 if let idx = self.shelvedSurfaces.firstIndex(where: { $0.id == id }) {
                     self.shelvedSurfaces[idx].hasActivity = false
+                    self.shelvedSurfaces[idx].needsAttention = true
                 }
                 self.activityResetTimers.removeValue(forKey: id)
             }
@@ -202,6 +296,8 @@ class AppLayoutManager: ObservableObject {
         guard let index = shelvedSurfaces.firstIndex(where: { $0.id == shelvedSurface.id }) else { return }
 
         titleObservers.removeValue(forKey: shelvedSurface.id)
+        pwdObservers.removeValue(forKey: shelvedSurface.id)
+        lastTitleChangeTimes.removeValue(forKey: shelvedSurface.id)
         activityResetTimers[shelvedSurface.id]?.invalidate()
         activityResetTimers.removeValue(forKey: shelvedSurface.id)
         shelvedSurfaces.remove(at: index)
@@ -212,12 +308,17 @@ class AppLayoutManager: ObservableObject {
         // We set the new tree first to avoid ever passing through an empty tree
         // (an empty tree triggers window close in TerminalController).
         let currentSurfaces = Array(controller.surfaceTree)
+        let previousFocus = controller.focusedSurface
         controller.surfaceTree = .init(view: surface)
 
         // Shelve the previous surfaces now that they've been removed from the tree.
         for current in currentSurfaces {
             shelveDetached(surface: current)
         }
+
+        // Explicitly move focus so focusedSurface updates and the sidebar highlight reflects correctly.
+        Ghostty.moveFocus(to: surface, from: previousFocus)
+        rebuildSidebarItems()
     }
 
     /// Remove a surface from the shelf without inserting it into the tree.
@@ -225,9 +326,12 @@ class AppLayoutManager: ObservableObject {
     func dequeueFromShelf(_ shelvedSurface: ShelvedSurface) {
         guard let index = shelvedSurfaces.firstIndex(where: { $0.id == shelvedSurface.id }) else { return }
         titleObservers.removeValue(forKey: shelvedSurface.id)
+        pwdObservers.removeValue(forKey: shelvedSurface.id)
+        lastTitleChangeTimes.removeValue(forKey: shelvedSurface.id)
         activityResetTimers[shelvedSurface.id]?.invalidate()
         activityResetTimers.removeValue(forKey: shelvedSurface.id)
         shelvedSurfaces.remove(at: index)
+        rebuildSidebarItems()
     }
 
     /// Bring a shelved surface back as a split alongside the currently focused surface.
@@ -236,6 +340,8 @@ class AppLayoutManager: ObservableObject {
         guard let index = shelvedSurfaces.firstIndex(where: { $0.id == shelvedSurface.id }) else { return }
 
         titleObservers.removeValue(forKey: shelvedSurface.id)
+        pwdObservers.removeValue(forKey: shelvedSurface.id)
+        lastTitleChangeTimes.removeValue(forKey: shelvedSurface.id)
         activityResetTimers[shelvedSurface.id]?.invalidate()
         activityResetTimers.removeValue(forKey: shelvedSurface.id)
         shelvedSurfaces.remove(at: index)
@@ -262,9 +368,12 @@ class AppLayoutManager: ObservableObject {
     func close(_ shelvedSurface: ShelvedSurface) {
         guard let index = shelvedSurfaces.firstIndex(where: { $0.id == shelvedSurface.id }) else { return }
         titleObservers.removeValue(forKey: shelvedSurface.id)
+        pwdObservers.removeValue(forKey: shelvedSurface.id)
+        lastTitleChangeTimes.removeValue(forKey: shelvedSurface.id)
         activityResetTimers[shelvedSurface.id]?.invalidate()
         activityResetTimers.removeValue(forKey: shelvedSurface.id)
         shelvedSurfaces.remove(at: index)
         // Releasing the SurfaceView here causes ghostty_surface_free via Ghostty.Surface.deinit
+        rebuildSidebarItems()
     }
 }

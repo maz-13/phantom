@@ -862,6 +862,8 @@ class BaseTerminalController: NSWindowController,
             // There is no surface to listen to titles for.
             titleDidChange(to: "👻")
         }
+
+        layoutManager.rebuildSidebarItems()
     }
 
     private func computeTitle(title: String, bell: Bool) -> String {
