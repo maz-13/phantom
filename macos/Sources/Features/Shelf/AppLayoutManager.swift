@@ -22,7 +22,7 @@ struct ShelvedSurface: Identifiable {
 class AppLayoutManager: ObservableObject {
 
     @Published private(set) var shelvedSurfaces: [ShelvedSurface] = []
-    @Published var isSidebarVisible: Bool = true
+    @Published var isSidebarVisible: Bool = false
     @Published var isSidebarOverlaying: Bool = false
 
     private weak var controller: BaseTerminalController?
@@ -120,6 +120,41 @@ class AppLayoutManager: ObservableObject {
     }
 
     // MARK: - Unshelving
+
+    /// Replace all visible surfaces with the given shelved surface (browser-tab behavior).
+    /// All currently visible surfaces are shelved, and only this surface is shown.
+    func unshelveAsSole(_ shelvedSurface: ShelvedSurface) {
+        guard let controller else { return }
+        guard let index = shelvedSurfaces.firstIndex(where: { $0.id == shelvedSurface.id }) else { return }
+
+        titleObservers.removeValue(forKey: shelvedSurface.id)
+        activityResetTimers[shelvedSurface.id]?.invalidate()
+        activityResetTimers.removeValue(forKey: shelvedSurface.id)
+        shelvedSurfaces.remove(at: index)
+
+        let surface = shelvedSurface.surface
+
+        // Capture current surfaces before replacing the tree.
+        // We set the new tree first to avoid ever passing through an empty tree
+        // (an empty tree triggers window close in TerminalController).
+        let currentSurfaces = Array(controller.surfaceTree)
+        controller.surfaceTree = .init(view: surface)
+
+        // Shelve the previous surfaces now that they've been removed from the tree.
+        for current in currentSurfaces {
+            shelveDetached(surface: current)
+        }
+    }
+
+    /// Remove a surface from the shelf without inserting it into the tree.
+    /// The caller is responsible for inserting the surface elsewhere to keep it alive.
+    func dequeueFromShelf(_ shelvedSurface: ShelvedSurface) {
+        guard let index = shelvedSurfaces.firstIndex(where: { $0.id == shelvedSurface.id }) else { return }
+        titleObservers.removeValue(forKey: shelvedSurface.id)
+        activityResetTimers[shelvedSurface.id]?.invalidate()
+        activityResetTimers.removeValue(forKey: shelvedSurface.id)
+        shelvedSurfaces.remove(at: index)
+    }
 
     /// Bring a shelved surface back as a split alongside the currently focused surface.
     func unshelve(_ shelvedSurface: ShelvedSurface) {

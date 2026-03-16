@@ -14,6 +14,11 @@ extension AppDelegate: Ghostty.Delegate {
             for surface in controller.surfaceTree where surface.id == id {
                 return surface
             }
+
+            // Also check shelved surfaces so drag-and-drop from the sidebar works.
+            if let shelved = controller.layoutManager.shelvedSurfaces.first(where: { $0.surface.id == id }) {
+                return shelved.surface
+            }
         }
 
         return nil

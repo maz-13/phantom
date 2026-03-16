@@ -185,7 +185,10 @@ private struct SidebarOverlayWrapper: View {
                             }
                         }
                     ))
-                    .frame(width: 20)
+                    // When the sidebar is showing, expand the strip to cover its full
+                    // width so mouseExited only fires when the cursor truly leaves the
+                    // sidebar. hitTest returns nil so clicks pass through to the sidebar.
+                    .frame(width: layoutManager.isSidebarOverlaying ? 200 : 20)
                     Spacer()
                 }
             }

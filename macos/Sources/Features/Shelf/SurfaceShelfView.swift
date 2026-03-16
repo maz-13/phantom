@@ -100,8 +100,9 @@ private struct ShelvedItemRow: View {
         )
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
+        .draggable(shelved.surface)
         .onTapGesture {
-            layoutManager.unshelve(shelved)
+            layoutManager.unshelveAsSole(shelved)
         }
     }
 }

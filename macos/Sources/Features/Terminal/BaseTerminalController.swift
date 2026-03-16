@@ -975,6 +975,35 @@ class BaseTerminalController: NSWindowController,
             }
         }
 
+        // Check if source is a shelved surface in any window's layout manager.
+        if sourceController == nil {
+            var shelfController: BaseTerminalController?
+            var shelvedEntry: ShelvedSurface?
+            for window in NSApp.windows {
+                guard let controller = window.windowController as? BaseTerminalController else { continue }
+                if let entry = controller.layoutManager.shelvedSurfaces.first(where: { $0.surface === source }) {
+                    shelfController = controller
+                    shelvedEntry = entry
+                    break
+                }
+            }
+
+            if let shelvedEntry, let shelfController {
+                shelfController.layoutManager.dequeueFromShelf(shelvedEntry)
+                let newTree: SplitTree<Ghostty.SurfaceView>
+                do {
+                    newTree = try surfaceTree.inserting(view: source, at: destination, direction: direction)
+                } catch {
+                    Ghostty.logger.warning("failed to insert shelved surface during drop: \(error)")
+                    // Re-shelve to avoid losing the surface
+                    shelfController.layoutManager.shelveDetached(surface: source)
+                    return
+                }
+                replaceSurfaceTree(newTree, moveFocusTo: source, moveFocusFrom: focusedSurface, undoAction: "Add Split from Shelf")
+                return
+            }
+        }
+
         guard let sourceController, let sourceNode else {
             Ghostty.logger.warning("source surface not found in any window during drop")
             return

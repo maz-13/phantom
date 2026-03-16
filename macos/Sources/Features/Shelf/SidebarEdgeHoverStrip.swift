@@ -47,5 +47,11 @@ struct SidebarEdgeHoverStrip: NSViewRepresentable {
         override func mouseExited(with event: NSEvent) {
             onExit?()
         }
+
+        /// Return nil so mouse clicks pass through to views behind this one.
+        /// NSTrackingArea enter/exit events are still delivered regardless.
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            return nil
+        }
     }
 }
