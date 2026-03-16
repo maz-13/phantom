@@ -47,6 +47,9 @@ struct TerminalView<ViewModel: TerminalViewModel>: View {
     // An optional delegate to receive information about terminal changes.
     weak var delegate: (any TerminalViewDelegate)?
 
+    // Optional layout manager for the shelf sidebar.
+    var layoutManager: AppLayoutManager? = nil
+
     /// The most recently focused surface, equal to `focusedSurface` when it is non-nil.
     @State private var lastFocusedSurface: Weak<Ghostty.SurfaceView>?
 
@@ -72,7 +75,14 @@ struct TerminalView<ViewModel: TerminalViewModel>: View {
             ErrorView()
         case .ready:
             ZStack {
-                VStack(spacing: 0) {
+                HStack(spacing: 0) {
+                    // Shelf sidebar on the left
+                    if let lm = layoutManager, !lm.shelvedSurfaces.isEmpty {
+                        SurfaceShelfView(layoutManager: lm)
+                        Divider()
+                    }
+
+                    VStack(spacing: 0) {
                     // If we're running in debug mode we show a warning so that users
                     // know that performance will be degraded.
                     if Ghostty.info.mode == GHOSTTY_BUILD_MODE_DEBUG || Ghostty.info.mode == GHOSTTY_BUILD_MODE_RELEASE_SAFE {
@@ -103,9 +113,10 @@ struct TerminalView<ViewModel: TerminalViewModel>: View {
                         }
                         .frame(idealWidth: lastFocusedSurface?.value?.initialSize?.width,
                                idealHeight: lastFocusedSurface?.value?.initialSize?.height)
+                    }
+                    // Ignore safe area to extend up in to the titlebar region if we have the "hidden" titlebar style
+                    .ignoresSafeArea(.container, edges: ghostty.config.macosTitlebarStyle == .hidden ? .top : [])
                 }
-                // Ignore safe area to extend up in to the titlebar region if we have the "hidden" titlebar style
-                .ignoresSafeArea(.container, edges: ghostty.config.macosTitlebarStyle == .hidden ? .top : [])
 
                 if let surfaceView = lastFocusedSurface?.value {
                     TerminalCommandPaletteView(

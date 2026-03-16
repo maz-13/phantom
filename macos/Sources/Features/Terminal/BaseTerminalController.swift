@@ -83,6 +83,9 @@ class BaseTerminalController: NSWindowController,
     /// Track whether background is forced opaque (true) or using config transparency (false)
     var isBackgroundOpaque: Bool = false
 
+    /// The shelf layout manager for this window.
+    private(set) lazy var layoutManager: AppLayoutManager = AppLayoutManager(controller: self)
+
     /// The cancellables related to our focused surface.
     private var focusedSurfaceCancellables: Set<AnyCancellable> = []
 
@@ -1447,6 +1450,16 @@ class BaseTerminalController: NSWindowController,
             self.focusFollowsMouse = config.focusFollowsMouse
             self.splitPreserveZoom = config.splitPreserveZoom
         }
+    }
+
+    // MARK: - Shelf Actions
+
+    @IBAction func shelfToggleFocusMode(_ sender: Any?) {
+        layoutManager.toggleFocusMode()
+    }
+
+    @IBAction func shelfShelveCurrentSurface(_ sender: Any?) {
+        layoutManager.shelveCurrentSurface()
     }
 }
 

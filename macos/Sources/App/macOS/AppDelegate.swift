@@ -233,6 +233,8 @@ class AppDelegate: NSObject,
             matching: [.keyDown],
             handler: localEventHandler)
 
+        addShelfMenuItems()
+
         // Notifications
         NotificationCenter.default.addObserver(
             self,
@@ -1353,6 +1355,32 @@ extension AppDelegate {
                 alert.runModal()
             }
         }
+    }
+}
+
+// MARK: Shelf Menu Items
+
+extension AppDelegate {
+    private func addShelfMenuItems() {
+        guard let windowMenu = NSApp.mainMenu?.items.first(where: { $0.title == "Window" })?.submenu else { return }
+
+        windowMenu.addItem(.separator())
+
+        let focusItem = NSMenuItem(
+            title: "Toggle Focus Mode",
+            action: #selector(BaseTerminalController.shelfToggleFocusMode(_:)),
+            keyEquivalent: "s"
+        )
+        focusItem.keyEquivalentModifierMask = [.command, .shift]
+        windowMenu.addItem(focusItem)
+
+        let shelveItem = NSMenuItem(
+            title: "Shelve Current Surface",
+            action: #selector(BaseTerminalController.shelfShelveCurrentSurface(_:)),
+            keyEquivalent: "h"
+        )
+        shelveItem.keyEquivalentModifierMask = [.command, .shift]
+        windowMenu.addItem(shelveItem)
     }
 }
 
