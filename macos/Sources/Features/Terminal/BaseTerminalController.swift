@@ -887,7 +887,11 @@ class BaseTerminalController: NSWindowController,
     }
 
     private static var isDebugBuild: Bool {
-        Ghostty.info.mode == GHOSTTY_BUILD_MODE_DEBUG || Ghostty.info.mode == GHOSTTY_BUILD_MODE_RELEASE_SAFE
+        #if DEBUG
+        return true
+        #else
+        return false
+        #endif
     }
 
     private func applyTitleToWindow() {
