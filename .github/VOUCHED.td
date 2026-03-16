@@ -29,8 +29,11 @@ alaasdk
 alanmoyano
 alexfeijoo44
 alexjuca
+alosarjos
 amadeus
 andrejdaskalov
+anhthang
+anmitalidev
 anthonyzhoon
 atomk
 balazs-szucs
@@ -42,11 +45,13 @@ bitigchi
 bkircher
 bo2themax
 brentschroeter
+cadebrown
 cespare
 charliie-dev
 chernetskyi
 chronologos
 cmwetherell
+crayxt
 craziestowl
 curtismoncoq
 d-dudas
@@ -54,6 +59,7 @@ daiimus
 damyanbogoev
 danulqua
 dariogriffo
+davidsanchez222
 dervedro
 devsunb
 diaaeddin
@@ -81,6 +87,7 @@ halosatrio
 hqnna
 hulet
 icodesign
+j0hnm4r5
 jacobsandlund
 jake-stewart
 jcollie
@@ -111,6 +118,7 @@ markdorison
 markhuot
 marrocco-simone
 matkotiric
+micaeljarniac
 michielvk
 miguelelgallo
 mihi314
@@ -122,6 +130,7 @@ miupa
 molechowski
 mrmage
 mtak
+mvanhorn
 natesmyth
 neo773
 nicosuave
@@ -139,6 +148,7 @@ phush0
 piedrahitac
 pluiedev
 pouwerkerk
+poweruser64
 prakhar54-byte
 priyans-hu
 puzza007
