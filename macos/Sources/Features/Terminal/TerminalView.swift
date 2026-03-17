@@ -146,9 +146,15 @@ private struct SidebarVisibleWrapper: View {
     @ObservedObject var layoutManager: AppLayoutManager
 
     var body: some View {
+        // PHANTOM: Always kept in the HStack so the terminal surface never receives a resize
+        // event from sidebar toggle or its animation. Frame collapses to 0 when hidden.
+        // .animation(nil) prevents the frame width from animating even if the caller uses
+        // withAnimation — only opacity fades, keeping the terminal width stable.
+        SurfaceShelfView(layoutManager: layoutManager)
+            .frame(width: layoutManager.isSidebarVisible ? 200 : 0)
+            .clipped()
+            .animation(nil, value: layoutManager.isSidebarVisible)
         if layoutManager.isSidebarVisible {
-            SurfaceShelfView(layoutManager: layoutManager)
-                .transition(.move(edge: .leading).combined(with: .opacity))
             Divider()
         }
     }

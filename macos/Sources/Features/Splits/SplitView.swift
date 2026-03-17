@@ -30,6 +30,12 @@ struct SplitView<L: View, R: View>: View {
     /// The current fractional width of the split view. 0.5 means L/R are equally sized, for example.
     @Binding var split: CGFloat
 
+    // PHANTOM: Track drag position separately so the terminal surface only resizes once
+    // (on drag end) rather than on every pixel of movement. Eliminates continuous scrollback
+    // reflows during panel drag when there is a lot of terminal output (e.g. long Claude chats).
+    @State private var isDragging = false
+    @State private var dragFraction: CGFloat = 0
+
     /// The visible size of the splitter, in points. The invisible size is a transparent hitbox that can still
     /// be used for getting a resize handle. The total width/height of the splitter is the sum of both.
     private let splitterVisibleSize: CGFloat = 1
@@ -40,6 +46,11 @@ struct SplitView<L: View, R: View>: View {
             let leftRect = self.leftRect(for: geo.size)
             let rightRect = self.rightRect(for: geo.size, leftRect: leftRect)
             let splitterPoint = self.splitterPoint(for: geo.size, leftRect: leftRect)
+            // PHANTOM: During drag, move the divider visually using dragFraction without
+            // changing the terminal surface sizes (which would trigger scrollback reflows).
+            let activeSplitterPoint: CGPoint = isDragging
+                ? self.splitterPoint(for: geo.size, leftRect: self.leftRect(for: geo.size, fraction: dragFraction))
+                : splitterPoint
 
             ZStack(alignment: .topLeading) {
                 left
@@ -57,7 +68,7 @@ struct SplitView<L: View, R: View>: View {
                         invisibleSize: splitterInvisibleSize,
                         color: dividerColor,
                         split: $split)
-                    .position(splitterPoint)
+                    .position(activeSplitterPoint)
                     .gesture(dragGesture(geo.size, splitterPoint: splitterPoint))
                     .onTapGesture(count: 2) {
                         onEqualize()
@@ -90,30 +101,42 @@ struct SplitView<L: View, R: View>: View {
     private func dragGesture(_ size: CGSize, splitterPoint: CGPoint) -> some Gesture {
         return DragGesture()
             .onChanged { gesture in
+                // PHANTOM: Update dragFraction only — terminal surfaces keep their current size.
+                if !isDragging {
+                    isDragging = true
+                    dragFraction = split
+                }
                 switch direction {
                 case .horizontal:
                     let new = min(max(minSize, gesture.location.x), size.width - minSize)
-                    split = new / size.width
+                    dragFraction = new / size.width
 
                 case .vertical:
                     let new = min(max(minSize, gesture.location.y), size.height - minSize)
-                    split = new / size.height
+                    dragFraction = new / size.height
                 }
+            }
+            .onEnded { _ in
+                // PHANTOM: Commit to binding on drag end — one reflow instead of ~60/s.
+                split = dragFraction
+                isDragging = false
             }
     }
 
     /// Calculates the bounding rect for the left view.
-    private func leftRect(for size: CGSize) -> CGRect {
+    /// Pass `fraction` to override `split` (used for drag preview positioning).
+    private func leftRect(for size: CGSize, fraction: CGFloat? = nil) -> CGRect {
+        let f = fraction ?? split
         // Initially the rect is the full size
         var result = CGRect(x: 0, y: 0, width: size.width, height: size.height)
         switch direction {
         case .horizontal:
-            result.size.width *= split
+            result.size.width *= f
             result.size.width -= splitterVisibleSize / 2
             result.size.width -= result.size.width.truncatingRemainder(dividingBy: self.resizeIncrements.width)
 
         case .vertical:
-            result.size.height *= split
+            result.size.height *= f
             result.size.height -= splitterVisibleSize / 2
             result.size.height -= result.size.height.truncatingRemainder(dividingBy: self.resizeIncrements.height)
         }
