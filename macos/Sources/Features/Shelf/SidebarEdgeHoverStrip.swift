@@ -26,18 +26,19 @@ struct SidebarEdgeHoverStrip: NSViewRepresentable {
 
         private var trackingArea: NSTrackingArea?
 
-        override func updateTrackingAreas() {
-            super.updateTrackingAreas()
-            if let existing = trackingArea {
-                removeTrackingArea(existing)
-            }
-            let newArea = NSTrackingArea(
-                rect: bounds,
-                options: [.mouseEnteredAndExited, .activeAlways],
+        // Use .inVisibleRect so AppKit owns the rect and updates it automatically on
+        // bounds changes. This avoids recreating the tracking area on every resize event,
+        // which was causing main-thread stalls during window resize at 60fps.
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            guard window != nil, trackingArea == nil else { return }
+            let area = NSTrackingArea(
+                rect: .zero,
+                options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
                 owner: self,
                 userInfo: nil)
-            addTrackingArea(newArea)
-            trackingArea = newArea
+            addTrackingArea(area)
+            trackingArea = area
         }
 
         override func mouseEntered(with event: NSEvent) {

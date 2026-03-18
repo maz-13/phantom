@@ -66,6 +66,7 @@ class AppLayoutManager: ObservableObject {
         self.controller = controller
         surfaceTreeCancellable = controller.$surfaceTree
             .receive(on: DispatchQueue.main)
+            .debounce(for: .milliseconds(16), scheduler: DispatchQueue.main)
             .sink { [weak self] _ in self?.rebuildSidebarItems() }
     }
 
